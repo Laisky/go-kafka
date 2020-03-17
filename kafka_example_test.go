@@ -1,4 +1,4 @@
-package kafka_test
+package kafka
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Laisky/go-utils/kafka"
 	"github.com/pkg/errors"
 )
 
@@ -14,20 +13,20 @@ func ExampleKafkaCli() {
 	var (
 		kmsgPool = &sync.Pool{
 			New: func() interface{} {
-				return &kafka.KafkaMsg{}
+				return &KafkaMsg{}
 			},
 		}
 	)
-	cli, err := kafka.NewKafkaCliWithGroupID(
+	cli, err := NewKafkaCliWithGroupID(
 		context.Background(),
-		&kafka.KafkaCliCfg{
+		&KafkaCliCfg{
 			Brokers:  []string{"brokers url here"},
 			Topics:   []string{"topics name here"},
 			Groupid:  "group id",
 			KMsgPool: kmsgPool,
 		},
-		kafka.WithCommitFilterCheckInterval(5*time.Second),
-		kafka.WithCommitFilterCheckNum(100),
+		WithCommitFilterCheckInterval(5*time.Second),
+		WithCommitFilterCheckNum(100),
 	)
 	if err != nil {
 		panic(errors.Wrap(err, "try to connect to kafka got error"))
