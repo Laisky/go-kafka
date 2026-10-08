@@ -71,7 +71,9 @@ type KafkaCliCfg struct {
 // KafkaCli kafka consumer client
 type KafkaCli struct {
 	*KafkaCliCfg
-	stopChan chan struct{}
+	stopChan  chan struct{}
+	closeOnce sync.Once
+	cancel    context.CancelFunc
 
 	cli                   *cluster.Consumer
 	beforeChan, afterChan chan *KafkaMsg
@@ -79,6 +81,12 @@ type KafkaCli struct {
 
 // NewKafkaCliWithGroupID create new kafka consumer
 func NewKafkaCliWithGroupID(ctx context.Context, cfg *KafkaCliCfg, opts ...CommitFilterOptFunc) (k *KafkaCli, err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+	}()
 	utils.Logger.Debug("NewKafkaCliWithGroupID",
 		zap.Strings("brokers", cfg.Brokers),
 		zap.Strings("topics", cfg.Topics),
@@ -98,6 +106,9 @@ func NewKafkaCliWithGroupID(ctx context.Context, cfg *KafkaCliCfg, opts ...Commi
 	// new commit filter
 	var cf *CommitFilter
 	if cf, err = NewCommitFilter(ctx, cfg.KMsgPool, opts...); err != nil {
+		if closeErr := consumer.Close(); closeErr != nil {
+			utils.Logger.Error("close consumer after commit filter setup failed", zap.Error(closeErr))
+		}
 		return nil, errors.Wrap(err, "new CommitFilter")
 	}
 
@@ -106,6 +117,7 @@ func NewKafkaCliWithGroupID(ctx context.Context, cfg *KafkaCliCfg, opts ...Commi
 		KafkaCliCfg: cfg,
 		cli:         consumer,
 		stopChan:    make(chan struct{}),
+		cancel:      cancel,
 		beforeChan:  cf.GetBeforeChan(),
 		afterChan:   cf.GetAfterChan(),
 	}
@@ -115,10 +127,15 @@ func NewKafkaCliWithGroupID(ctx context.Context, cfg *KafkaCliCfg, opts ...Commi
 	return k, nil
 }
 
-// Close close kafka client
+// Close stops every worker and closes the broker consumer once, even after cancellation.
 func (k *KafkaCli) Close() {
-	k.stopChan <- struct{}{}
-	k.cli.Close()
+	k.closeOnce.Do(func() {
+		close(k.stopChan)
+		k.cancel()
+		if err := k.cli.Close(); err != nil {
+			utils.Logger.Error("close kafka consumer", zap.Error(err))
+		}
+	})
 }
 
 // ListenNotifications log kafka broker notify
@@ -144,7 +161,8 @@ func (k *KafkaCli) ListenNotifications(ctx context.Context) {
 	}
 }
 
-// Messages get kafka messages chan
+// Messages returns a producer-owned channel that closes when its context or client stops.
+// Delivered pooled messages remain owned by the caller until CommitWithMsg is called.
 func (k *KafkaCli) Messages(ctx context.Context) <-chan *KafkaMsg {
 	msgChan := make(chan *KafkaMsg, 1000)
 	var (
@@ -154,6 +172,7 @@ func (k *KafkaCli) Messages(ctx context.Context) <-chan *KafkaMsg {
 	)
 	go func() {
 		defer utils.Logger.Debug("message consumer exit")
+		defer close(msgChan)
 		for {
 			select {
 			case <-ctx.Done():
@@ -172,7 +191,15 @@ func (k *KafkaCli) Messages(ctx context.Context) <-chan *KafkaMsg {
 			kmsg.Offset = msg.Offset
 			kmsg.Partition = msg.Partition
 			kmsg.Timestamp = msg.Timestamp
-			msgChan <- kmsg
+			select {
+			case msgChan <- kmsg:
+			case <-ctx.Done():
+				k.KMsgPool.Put(kmsg)
+				return
+			case <-k.stopChan:
+				k.KMsgPool.Put(kmsg)
+				return
+			}
 		}
 	}()
 
