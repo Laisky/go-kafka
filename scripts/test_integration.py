@@ -84,7 +84,7 @@ def main():
             if owned_container:
                 identity = subprocess.run(["docker", "inspect", "-f", '{{index .Config.Labels "go-kafka.integration"}}', name], capture_output=True, text=True, timeout=10)
                 if identity.returncode == 0 and identity.stdout.strip() == name:
-                    subprocess.run(["docker", "rm", "-f", name], check=False, capture_output=True, timeout=30)
+                    subprocess.run(["docker", "rm", "-fv", name], check=False, capture_output=True, timeout=30)
             if owned_network:
                 subprocess.run(["docker", "network", "rm", network], check=False, capture_output=True, timeout=30)
 
