@@ -3,7 +3,7 @@
 import pathlib, subprocess, os, json, time, fcntl, shutil, tempfile, uuid
 
 KAFKA_IMAGE = "apache/kafka@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed"
-GO_IMAGE = "golang@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c"
+GO_IMAGE = "golang@sha256:5bc7f572bbaa98885a3a1fd9c0aa76b59e3e14e8628bfc316bbfd0c701e4818c"
 
 def main():
  p=pathlib.Path(__file__).resolve().parents[1]
@@ -82,7 +82,7 @@ def main():
    log=r/"kafka-secure-acceptance.log";started=time.time()
    with log.open("w") as f:q=subprocess.run(args,stdout=f,stderr=subprocess.STDOUT,timeout=240)
    receipt={"code":q.returncode,"seconds":time.time()-started,"fixture":cid,"source":str(ctx)}
-   (r/"kafka-secure-acceptance.json").write_text(json.dumps(receipt,indent=2));print(json.dumps(receipt),flush=True);print(log.read_text(errors="replace")[-6000:],flush=True)
+   (r/"kafka-secure-acceptance.json").write_text(json.dumps(receipt,indent=2));print(json.dumps(receipt),flush=True);print(log.read_text(errors="replace"),flush=True)
   finally:
    brokerLog=subprocess.run(["docker","logs",cid],capture_output=True,text=True)
    (r/"kafka-secure-broker.log").write_text(brokerLog.stdout+brokerLog.stderr)

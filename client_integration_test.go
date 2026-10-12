@@ -10,14 +10,13 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
-	cluster "github.com/bsm/sarama-cluster"
 	"net"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/Shopify/sarama"
+	"github.com/IBM/sarama"
 )
 
 // integrationBroker permits only an explicitly selected loopback broker.
@@ -47,7 +46,7 @@ func integrationName(t *testing.T) string {
 // integrationConfig bounds all auxiliary broker requests without changing client defaults.
 func integrationConfig() *sarama.Config {
 	cfg := sarama.NewConfig()
-	cfg.Version = sarama.V0_10_2_0
+	cfg.Version = sarama.V2_8_0_0
 	cfg.Net.DialTimeout = 3 * time.Second
 	cfg.Net.ReadTimeout = 3 * time.Second
 	cfg.Net.WriteTimeout = 3 * time.Second
@@ -104,8 +103,7 @@ func integrationConsumer(t *testing.T, address, topic, group string) (*KafkaCli,
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	pool := &sync.Pool{New: func() interface{} { return &KafkaMsg{} }}
-	clusterCfg := cluster.NewConfig()
-	clusterCfg.Config = *integrationConfig()
+	clusterCfg := integrationConfig()
 	cli, err := NewKafkaCliWithGroupID(ctx, &KafkaCliCfg{Brokers: []string{address}, Topics: []string{topic}, Groupid: group, KMsgPool: pool, ClusterConfig: clusterCfg, AllowPlaintextForTrustedTunnel: os.Getenv("KAFKA_TEST_TLS_CA") == ""}, WithCommitFilterCheckInterval(50*time.Millisecond), WithCommitFilterCheckNum(1))
 	if err != nil {
 		cancel()
@@ -332,8 +330,7 @@ func TestIntegrationSecureConstructorRejectsUntrustedAndMismatchedPeers(t *testi
 	}
 	for _, mode := range []string{"unknown CA", "wrong hostname", "missing client certificate", "wrong SASL"} {
 		t.Run(mode, func(t *testing.T) {
-			cfg := cluster.NewConfig()
-			cfg.Config = *integrationConfig()
+			cfg := integrationConfig()
 			cfg.Net.DialTimeout = time.Second
 			cfg.Net.ReadTimeout = time.Second
 			cfg.Net.WriteTimeout = time.Second

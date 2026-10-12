@@ -2,7 +2,7 @@ package kafka
 
 import (
 	"context"
-	cluster "github.com/bsm/sarama-cluster"
+	"github.com/IBM/sarama"
 	"io"
 	"net"
 	"sync"
@@ -11,7 +11,7 @@ import (
 )
 
 func TestTransportPinnedDefaultsArePlaintext(t *testing.T) {
-	cfg := cluster.NewConfig()
+	cfg := sarama.NewConfig()
 	if cfg.Net.TLS.Enable || cfg.Net.SASL.Enable {
 		t.Fatal("pinned defaults differ from scanner evidence")
 	}

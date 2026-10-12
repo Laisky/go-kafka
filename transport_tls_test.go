@@ -8,7 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	cluster "github.com/bsm/sarama-cluster"
+	"github.com/IBM/sarama"
 	"math/big"
 	"net"
 	"sync"
@@ -65,7 +65,7 @@ func TestTransportConfigurationValidation(t *testing.T) {
 	if err != nil || !effective.Net.TLS.Enable || effective.Net.TLS.Config.InsecureSkipVerify || effective.Net.TLS.Config.MinVersion < tls.VersionTLS12 {
 		t.Fatalf("secure default missing: %v", err)
 	}
-	supplied := cluster.NewConfig()
+	supplied := sarama.NewConfig()
 	supplied.Net.TLS.Config = &tls.Config{MinVersion: tls.VersionTLS12}
 	supplied.Net.SASL.Enable = true
 	supplied.Net.SASL.User = "synthetic-user"
@@ -141,7 +141,7 @@ func TestTransportTLSChainHostnameAndMutualAuth(t *testing.T) {
 				serverDone <- err
 			}()
 			cfg := validWrapperConfig()
-			custom := cluster.NewConfig()
+			custom := sarama.NewConfig()
 			custom.Net.TLS.Config = &tls.Config{ServerName: tc.hostname, MinVersion: tls.VersionTLS12}
 			if tc.trust {
 				custom.Net.TLS.Config.RootCAs = roots
@@ -175,7 +175,7 @@ func TestTransportTLSChainHostnameAndMutualAuth(t *testing.T) {
 }
 func TestTransportInvalidPublicConfigurationFailsBeforeDial(t *testing.T) {
 	cfg := validWrapperConfig()
-	cfg.ClusterConfig = cluster.NewConfig()
+	cfg.ClusterConfig = sarama.NewConfig()
 	cfg.ClusterConfig.Net.TLS.Config = &tls.Config{InsecureSkipVerify: true}
 	if _, err := NewKafkaCliWithGroupID(context.Background(), cfg); err == nil {
 		t.Fatal("unsafe public configuration was accepted")

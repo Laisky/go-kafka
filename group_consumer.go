@@ -148,7 +148,7 @@ func (g *groupConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim 
 }
 
 func (g *groupConsumer) Messages() <-chan *groupMessage { return g.messages }
-func (g *groupConsumer) Errors() <-chan error          { return g.group.Errors() }
+func (g *groupConsumer) Errors() <-chan error           { return g.group.Errors() }
 
 func (g *groupConsumer) Subscriptions() map[string][]int32 {
 	g.mu.RLock()

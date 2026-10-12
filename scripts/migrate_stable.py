@@ -86,7 +86,7 @@ func TestTransportCopiesNativeMemberData(t *testing.T) {
     # Every surviving Go import is resolved through the current release graph.
     (ROOT / "go.mod").write_text("module github.com/Laisky/go-kafka\n\ngo 1.26.9\n")
     modules = [
-        "github.com/IBM/sarama", "github.com/Laisky/go-utils/v6", "github.com/Laisky/zap",
+        "github.com/IBM/sarama", "github.com/Laisky/go-utils/v6",
         "github.com/golang-jwt/jwt/v5", "github.com/hashicorp/consul/api",
         "github.com/hashicorp/go-retryablehttp", "github.com/klauspost/compress",
         "github.com/pkg/errors", "github.com/pkg/sftp", "github.com/prometheus/client_golang",
@@ -94,7 +94,7 @@ func TestTransportCopiesNativeMemberData(t *testing.T) {
         "google.golang.org/protobuf",
     ]
     subprocess.run(["go", "get", *[m + "@latest" for m in modules]], cwd=ROOT, check=True)
-    subprocess.run(["go", "get", "-u", "./..."], cwd=ROOT, check=True)
+    subprocess.run(["go", "get", "-u", "-t", "./..."], cwd=ROOT, check=True)
     subprocess.run(["go", "mod", "tidy"], cwd=ROOT, check=True)
     for name in [".github/workflows/test.yml", ".github/workflows/security-review.yml"]:
         edit(name, [("'1.26.9'", "'1.27.2'")])

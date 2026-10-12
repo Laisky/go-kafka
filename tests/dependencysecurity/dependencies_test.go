@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	utils "github.com/Laisky/go-utils"
-	jwt "github.com/golang-jwt/jwt/v4"
+	"errors"
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
@@ -22,19 +22,20 @@ func TestSettingsConsumerContract(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := utils.Settings.LoadFromFile(path); err != nil {
+	viper.SetConfigFile(path)
+	if err := viper.ReadInConfig(); err != nil {
 		t.Fatal(err)
 	}
-	if utils.Settings.GetBool("dry") {
+	if viper.GetBool("dry") {
 		t.Fatal("file bool changed")
 	}
-	if utils.Settings.GetString("APP") != "synthetic-consumer" {
+	if viper.GetString("APP") != "synthetic-consumer" {
 		t.Fatal("case-insensitive key changed")
 	}
-	if got := utils.Settings.GetStringSlice("labels"); len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
+	if got := viper.GetStringSlice("labels"); len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
 		t.Fatalf("list changed: %v", got)
 	}
-	if utils.Settings.GetDuration("http.timeout") != 2*time.Second {
+	if viper.GetDuration("http.timeout") != 2*time.Second {
 		t.Fatal("duration changed")
 	}
 	flags := pflag.NewFlagSet("synthetic", pflag.ContinueOnError)
@@ -42,10 +43,10 @@ func TestSettingsConsumerContract(t *testing.T) {
 	if err := flags.Parse([]string{"--dry"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := utils.Settings.BindPFlags(flags); err != nil {
+	if err := viper.BindPFlags(flags); err != nil {
 		t.Fatal(err)
 	}
-	if !utils.Settings.GetBool("dry") {
+	if !viper.GetBool("dry") {
 		t.Fatal("explicit flag did not override file")
 	}
 	var config struct {
@@ -56,7 +57,7 @@ func TestSettingsConsumerContract(t *testing.T) {
 			Timeout time.Duration
 		} `mapstructure:"http"`
 	}
-	if err := utils.Settings.Unmarshal(&config); err != nil {
+	if err := viper.Unmarshal(&config); err != nil {
 		t.Fatal(err)
 	}
 	if !config.Dry || config.App != "synthetic-consumer" || config.HTTP.Listen != "127.0.0.1:12345" || config.HTTP.Timeout != 2*time.Second {
@@ -86,9 +87,8 @@ func TestJWTDependencyRejectsOversizedAndInvalidTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	token, err := jwt.Parse(signed, func(*jwt.Token) (interface{}, error) { return []byte("synthetic-correct-key"), nil })
-	validation, ok := err.(*jwt.ValidationError)
-	if err == nil || !ok || validation.Errors&jwt.ValidationErrorSignatureInvalid == 0 || validation.Errors&jwt.ValidationErrorExpired != 0 || (token != nil && token.Valid) {
+	if err == nil || !errors.Is(err, jwt.ErrTokenSignatureInvalid) || errors.Is(err, jwt.ErrTokenExpired) || (token != nil && token.Valid) {
 		t.Fatalf("bad signature must be rejected before expiration handling: token=%#v error=%v", token, err)
 	}
-	t.Logf("JWT v4 fixed behavior: oversized input rejected with %d bytes; invalid signature rejected first", bytesPerToken)
+	t.Logf("JWT v5 fixed behavior: oversized input rejected with %d bytes; invalid signature rejected first", bytesPerToken)
 }

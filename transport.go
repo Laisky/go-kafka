@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	cluster "github.com/bsm/sarama-cluster"
+	"github.com/IBM/sarama"
 )
 
-func validatedKafkaConfig(cfg *KafkaCliCfg) (*cluster.Config, error) {
+func validatedKafkaConfig(cfg *KafkaCliCfg) (*sarama.Config, error) {
 	if cfg == nil || len(cfg.Brokers) == 0 || len(cfg.Topics) == 0 || cfg.Groupid == "" || cfg.KMsgPool == nil {
 		return nil, fmt.Errorf("brokers, topics, group ID and message pool are required")
 	}
@@ -18,20 +18,32 @@ func validatedKafkaConfig(cfg *KafkaCliCfg) (*cluster.Config, error) {
 			return nil, fmt.Errorf("invalid Kafka broker address")
 		}
 	}
-	config := cluster.NewConfig()
+	config := sarama.NewConfig()
 	if cfg.ClusterConfig != nil {
 		*config = *cfg.ClusterConfig
-		config.Group.Member.UserData = append([]byte(nil), cfg.ClusterConfig.Group.Member.UserData...)
+		config.Consumer.Group.Member.UserData = append([]byte(nil), cfg.ClusterConfig.Consumer.Group.Member.UserData...)
+		config.Consumer.Group.Rebalance.GroupStrategies = append([]sarama.BalanceStrategy(nil), cfg.ClusterConfig.Consumer.Group.Rebalance.GroupStrategies...)
 	}
-	// The wrapper exposes only the multiplexed Messages stream, not Partitions.
-	// Accepting partition mode would silently strand messages in an unread stream.
-	if config.Group.Mode != cluster.ConsumerModeMultiplex {
-		return nil, fmt.Errorf("Kafka wrapper requires ConsumerModeMultiplex")
+	// Preserve the original eager-rebalance contract. Cooperative claims may be
+	// revoked without cancelling the session, which a backpressured channel API
+	// cannot use as its shutdown signal. Reject unsupported strategies before dial.
+	strategies := config.Consumer.Group.Rebalance.GroupStrategies
+	if legacy := config.Consumer.Group.Rebalance.Strategy; legacy != nil {
+		strategies = append(append([]sarama.BalanceStrategy(nil), strategies...), legacy)
+	}
+	for _, strategy := range strategies {
+		if strategy == nil {
+			return nil, fmt.Errorf("nil Kafka balance strategy")
+		}
+		switch strategy.Name() {
+		case "range", "roundrobin", "sticky":
+		default:
+			return nil, fmt.Errorf("Kafka wrapper requires an eager balance strategy, got %q", strategy.Name())
+		}
 	}
 	config.Net.KeepAlive = 30 * time.Second
 	config.Consumer.Return.Errors = true
-	config.Group.Return.Notifications = true
-	config.Consumer.Offsets.CommitInterval = time.Second
+	config.Consumer.Offsets.AutoCommit.Interval = time.Second
 	config.Net.TLS.Enable = !cfg.AllowPlaintextForTrustedTunnel
 	if config.Net.TLS.Enable {
 		if config.Net.TLS.Config == nil {
