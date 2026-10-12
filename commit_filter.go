@@ -5,10 +5,18 @@ import (
 	"sync"
 	"time"
 
-	utils "github.com/Laisky/go-utils"
+	glog "github.com/Laisky/go-utils/v6/log"
 	"github.com/Laisky/zap"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 )
+
+// topicPartition identifies an independent Kafka offset sequence.
+type topicPartition struct {
+	topic     string
+	partition int32
+	claim     *claimState
+}
 
 type msgRecord struct {
 	num         int
@@ -35,12 +43,21 @@ func NewCommitFilter(ctx context.Context, kMsgPool *sync.Pool, opts ...CommitFil
 			commitCheckChanSize: defaultCommitCheckChanSize,
 		},
 	}
+	if kMsgPool == nil {
+		return nil, errors.New("message pool is required")
+	}
 	for _, optf := range opts {
+		if optf == nil {
+			return nil, errors.New("nil commit option")
+		}
 		if err = optf(f.commitCheckOption); err != nil {
 			return nil, errors.Wrap(err, "set commit check option")
 		}
 	}
-	utils.Logger.Info("NewCommitFilter",
+	if f.commitCheckInterval <= 0 || f.commitCheckNum < 0 || f.commitCheckChanSize < 0 {
+		return nil, errors.New("commit interval must be positive and count/queue size nonnegative")
+	}
+	glog.Shared.Info("NewCommitFilter",
 		zap.Int("chan_size", f.commitCheckChanSize),
 		zap.Duration("interval_duration", f.commitCheckInterval),
 		zap.Int("interval_num", f.commitCheckNum))
@@ -61,16 +78,14 @@ func (f *CommitFilter) GetAfterChan() chan *KafkaMsg {
 	return f.afterChan
 }
 
-// runFilterBeforeChan maintain a kmsgSlots that cache the latest kmsg record.
-// invoke filterSlots2AfterChan in fixed frequency.
+// runFilterBeforeChan caches the latest message for each topic and partition,
+// then invokes filterSlots2AfterChan at a fixed frequency.
 func (f *CommitFilter) runFilterBeforeChan(ctx context.Context) {
-	utils.Logger.Debug("start runFilterBeforeChan")
-	defer utils.Logger.Debug("runFilterBeforeChan quit")
+	glog.Shared.Debug("start runFilterBeforeChan")
+	defer glog.Shared.Debug("runFilterBeforeChan quit")
 	var (
-		kmsgSlots = map[int32]*msgRecord{} // map[kafka partition id]record
-		kmsg      *KafkaMsg                // kafka message
-		// one record to one partition,
-		// record latest message in partition (max offset)
+		kmsgSlots              = map[topicPartition]*msgRecord{}
+		kmsg                   *KafkaMsg
 		record                 *msgRecord
 		ok                     bool
 		scanSlots2CommitTicker = time.NewTicker(1 * time.Second)
@@ -89,10 +104,18 @@ func (f *CommitFilter) runFilterBeforeChan(ctx context.Context) {
 			}
 		}
 
-		// record not exists, create new record
-		if record, ok = kmsgSlots[kmsg.Partition]; !ok {
-			kmsgSlots[kmsg.Partition] = &msgRecord{
-				lastCommitT: utils.Clock.GetUTCNow(),
+		if kmsg == nil {
+			continue
+		}
+		if kmsg.claim != nil && !kmsg.claim.live() {
+			f.kMsgPool.Put(kmsg)
+			continue
+		}
+		// Offsets are comparable only within one topic, partition and assignment.
+		key := topicPartition{topic: kmsg.Topic, partition: kmsg.Partition, claim: kmsg.claim}
+		if record, ok = kmsgSlots[key]; !ok {
+			kmsgSlots[key] = &msgRecord{
+				lastCommitT: time.Now().UTC(),
 				lastMsg:     kmsg,
 				lastOffset:  kmsg.Offset,
 				num:         1,
@@ -112,7 +135,7 @@ func (f *CommitFilter) runFilterBeforeChan(ctx context.Context) {
 			if !record.isCommitted {
 				// only recycle uncommitted msg at here,
 				// let commitor to recycle committed msg
-				f.kMsgPool.Put(kmsgSlots[kmsg.Partition].lastMsg)
+				f.kMsgPool.Put(record.lastMsg)
 			}
 
 			record.lastMsg = kmsg
@@ -127,16 +150,23 @@ func (f *CommitFilter) runFilterBeforeChan(ctx context.Context) {
 // filterSlots2AfterChan filter all records in kmsgSlots,
 // put kmsg that match `IntervalDuration` and `IntervalNum` conditions
 // into innerChan to commit to kafka.
-func (f *CommitFilter) filterSlots2AfterChan(kmsgSlots map[int32]*msgRecord) {
-	now := utils.Clock.GetUTCNow()
-	utils.Logger.Debug("run filterSlots2AfterChan")
-	defer utils.Logger.Debug("done filterSlots2AfterChan", zap.Duration("cost", utils.Clock.GetUTCNow().Sub(now)))
+func (f *CommitFilter) filterSlots2AfterChan(kmsgSlots map[topicPartition]*msgRecord) {
+	now := time.Now().UTC()
+	glog.Shared.Debug("run filterSlots2AfterChan")
+	defer glog.Shared.Debug("done filterSlots2AfterChan", zap.Duration("cost", time.Now().UTC().Sub(now)))
 
-	for _, record := range kmsgSlots {
+	for key, record := range kmsgSlots {
+		if key.claim != nil && !key.claim.live() {
+			if !record.isCommitted {
+				f.kMsgPool.Put(record.lastMsg)
+			}
+			delete(kmsgSlots, key)
+			continue
+		}
 		if !record.isCommitted &&
 			(record.num > f.commitCheckNum || now.Sub(record.lastCommitT) > f.commitCheckInterval) {
-			if utils.Settings.GetBool("dry") {
-				utils.Logger.Debug("put msg into afterChan",
+			if viper.GetBool("dry") {
+				glog.Shared.Debug("put msg into afterChan",
 					zap.Time("last_commit_time", record.lastCommitT),
 					zap.Int("num", record.num))
 				continue
