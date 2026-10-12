@@ -1,0 +1,68 @@
+name: Go tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      integration:
+        description: Run owned disposable Kafka broker acceptance
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.26.9'
+      - name: Check formatting
+        run: test -z "$(gofmt -l $(git ls-files '*.go'))"
+      - name: Verify modules
+        run: go mod download && go mod verify
+      - name: Run tests with race detection
+        run: go test -race -count=1 -timeout=120s ./...
+      - name: Vet and build
+        run: go vet ./... && go build ./...
+      - name: Check module consistency
+        run: go mod tidy && git diff --exit-code -- go.mod go.sum
+
+  integration:
+    if: inputs.integration == true || contains(github.event.pull_request.labels.*.name, 'integration')
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.26.9'
+      - name: Test owned disposable plaintext broker
+        env:
+          KAFKA_TEST_LOCK: /tmp/go-kafka-integration.lock
+        run: |
+          docker pull apache/kafka:3.9.1
+          KAFKA_TEST_GO="$(command -v go)" python3 scripts/test_integration.py
+      - name: Test owned disposable secure broker when available
+        env:
+          KAFKA_TEST_LOCK: /tmp/go-kafka-integration.lock
+        run: |
+          if test -f scripts/test_secure_integration.py; then
+            python3 scripts/test_secure_integration.py
+          fi
