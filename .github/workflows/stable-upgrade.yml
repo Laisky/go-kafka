@@ -28,6 +28,7 @@ jobs:
           from pathlib import Path
           p = Path('scripts/migrate_stable.py')
           text = p.read_text().replace('"github.com/Laisky/go-utils/v6", "github.com/Laisky/zap",', '"github.com/Laisky/go-utils/v6",')
+          text = text.replace('["go", "get", "-u", "./..."]', '["go", "get", "-u", "-t", "./..."]')
           p.write_text(text)
           PY
           python3 scripts/migrate_stable.py
