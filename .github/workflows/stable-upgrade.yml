@@ -5,19 +5,76 @@ on:
     paths: [.github/workflows/stable-upgrade.yml]
 permissions:
   contents: read
+concurrency:
+  group: stable-dependency-upgrade
+  cancel-in-progress: false
 jobs:
-  audit:
-    if: github.repository == 'Laisky/go-kafka'
+  upgrade:
+    if: github.repository == 'Laisky/go-kafka' && github.actor == 'Laisky' && github.ref == 'refs/heads/chore/go-utils-compatible-20261008'
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
         with:
           go-version: '1.27.2'
-          cache: false
-      - name: Resolve released modules
+      - name: Migrate source and resolve latest stable dependencies
         run: |
-          cd "$RUNNER_TEMP"
-          mkdir module-audit && cd module-audit
-          go mod init example.invalid/module-audit
-          go list -m -json github.com/IBM/sarama@latest github.com/Laisky/go-utils/v6@latest github.com/Laisky/zap@latest github.com/golang-jwt/jwt/v5@latest github.com/hashicorp/consul/api@latest github.com/hashicorp/go-retryablehttp@latest github.com/klauspost/compress@latest github.com/pkg/errors@latest github.com/pkg/sftp@latest github.com/prometheus/client_golang@latest github.com/sirupsen/logrus@latest github.com/spf13/pflag@latest github.com/spf13/viper@latest google.golang.org/protobuf@latest
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/migrate_stable.py')
+          text = p.read_text().replace('"github.com/Laisky/go-utils/v6", "github.com/Laisky/zap",', '"github.com/Laisky/go-utils/v6",')
+          p.write_text(text)
+          PY
+          python3 scripts/migrate_stable.py
+          cat go.mod
+          go list -m -u all
+          if go list -deps ./... | grep -Eq '^github.com/(Shopify/sarama|bsm/sarama-cluster|Laisky/go-utils$|golang-jwt/jwt/v4)'; then
+            echo 'Obsolete imported dependency survived migration'; exit 1
+          fi
+      - name: Race tests, module verification, vet and build
+        run: |
+          go mod verify
+          go test -race -count=1 -timeout=180s -v ./...
+          go vet ./...
+          go vet -tags integration ./...
+          go build ./...
+          cp go.mod /tmp/qualified-go.mod
+          cp go.sum /tmp/qualified-go.sum
+          go mod tidy
+          cmp go.mod /tmp/qualified-go.mod
+          cmp go.sum /tmp/qualified-go.sum
+          git diff --check
+      - name: Qualify retained minimum compiler
+        run: GOTOOLCHAIN=go1.26.9 go test -race -count=1 -timeout=180s ./...
+      - name: Real Kafka plaintext and TLS-mTLS-SASL acceptance
+        env:
+          KAFKA_TEST_LOCK: /tmp/go-kafka-upgrade.lock
+        run: |
+          docker pull apache/kafka:3.9.1
+          KAFKA_TEST_GO="$(command -v go)" python3 scripts/test_integration.py
+          KAFKA_TEST_GO="$(command -v go)" python3 scripts/test_secure_integration.py
+      - name: Check imported and reachable vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          govulncheck -scan package -show verbose ./...
+          govulncheck -show verbose ./...
+      - name: Commit only qualified source and module files to the same candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git restore --source=HEAD -- .github/workflows
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          gh auth setup-git
+          remote_head=$(git ls-remote origin refs/heads/chore/go-utils-compatible-20261008 | cut -f1)
+          test "$remote_head" = "$GITHUB_SHA"
+          git add -- '*.go' go.mod go.sum scripts/migrate_stable.py scripts/test_secure_integration.py tests/dependencysecurity
+          git diff --cached --stat
+          git commit -m 'build: upgrade stable dependencies and qualify native group compatibility'
+          git push origin HEAD:refs/heads/chore/go-utils-compatible-20261008
+          echo "QUALIFIED_COMMIT=$(git rev-parse HEAD)"
