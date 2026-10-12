@@ -1,0 +1,23 @@
+name: Stable dependency upgrade
+on:
+  push:
+    branches: [chore/go-utils-compatible-20261008]
+    paths: [.github/workflows/stable-upgrade.yml]
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: github.repository == 'Laisky/go-kafka'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Resolve released modules
+        run: |
+          cd "$RUNNER_TEMP"
+          mkdir module-audit && cd module-audit
+          go mod init example.invalid/module-audit
+          go list -m -json github.com/IBM/sarama@latest github.com/Laisky/go-utils/v6@latest github.com/Laisky/zap@latest github.com/golang-jwt/jwt/v5@latest github.com/hashicorp/consul/api@latest github.com/hashicorp/go-retryablehttp@latest github.com/klauspost/compress@latest github.com/pkg/errors@latest github.com/pkg/sftp@latest github.com/prometheus/client_golang@latest github.com/sirupsen/logrus@latest github.com/spf13/pflag@latest github.com/spf13/viper@latest google.golang.org/protobuf@latest
