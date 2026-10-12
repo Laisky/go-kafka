@@ -66,6 +66,12 @@ type KafkaCliCfg struct {
 	Brokers, Topics []string
 	Groupid         string
 	KMsgPool        *sync.Pool
+	// ClusterConfig supplies caller-owned TLS/authentication and broker settings.
+	// The constructor copies it and validates verified TLS by default.
+	ClusterConfig *cluster.Config
+	// AllowPlaintextForTrustedTunnel is an explicit opt-in only when an
+	// independently authenticated and integrity-protected tunnel is mandatory.
+	AllowPlaintextForTrustedTunnel bool
 }
 
 // KafkaCli kafka consumer client
@@ -87,17 +93,18 @@ func NewKafkaCliWithGroupID(ctx context.Context, cfg *KafkaCliCfg, opts ...Commi
 			cancel()
 		}
 	}()
+	if cfg == nil {
+		return nil, errors.New("Kafka configuration is required")
+	}
 	utils.Logger.Debug("NewKafkaCliWithGroupID",
 		zap.Strings("brokers", cfg.Brokers),
 		zap.Strings("topics", cfg.Topics),
 		zap.String("groupid", cfg.Groupid))
 
-	// init sarama kafka client
-	config := cluster.NewConfig()
-	config.Net.KeepAlive = 30 * time.Second
-	config.Consumer.Return.Errors = true
-	config.Group.Return.Notifications = true
-	config.Consumer.Offsets.CommitInterval = 1 * time.Second
+	config, err := validatedKafkaConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	consumer, err := cluster.NewConsumer(cfg.Brokers, cfg.Groupid, cfg.Topics, config)
 	if err != nil {
 		return nil, errors.Wrap(err, "create kafka consumer got error")

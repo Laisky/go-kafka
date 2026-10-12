@@ -42,3 +42,10 @@ must upgrade their toolchain before adopting this version. The floor follows
 which selects the fixed crypto and text dependency versions. Security metadata
 covers the dependency graph and does not establish that every advisory is
 reachable through this application.
+
+## Broker transport migration
+
+Verified TLS is now the default. Plaintext broker callers must migrate; private
+CA, mutual TLS and SASL settings can be supplied through KafkaCliCfg.ClusterConfig.
+See [transport migration and secure acceptance](docs/transport-security.md) for
+configuration, explicit trusted-tunnel opt-in and repeatable negative controls.
