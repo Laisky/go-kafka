@@ -6,8 +6,11 @@ package kafka
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"fmt"
+	cluster "github.com/bsm/sarama-cluster"
 	"net"
 	"os"
 	"sync"
@@ -52,6 +55,31 @@ func integrationConfig() *sarama.Config {
 	cfg.Metadata.Retry.Backoff = 100 * time.Millisecond
 	cfg.Producer.Return.Successes = true
 	cfg.Producer.RequiredAcks = sarama.WaitForAll
+	if caPath := os.Getenv("KAFKA_TEST_TLS_CA"); caPath != "" {
+		ca, err := os.ReadFile(caPath)
+		if err != nil {
+			panic(err)
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(ca) {
+			panic("invalid synthetic CA")
+		}
+		cfg.Net.TLS.Enable = true
+		cfg.Net.TLS.Config = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+		if certPath := os.Getenv("KAFKA_TEST_TLS_CERT"); certPath != "" {
+			cert, err := tls.LoadX509KeyPair(certPath, os.Getenv("KAFKA_TEST_TLS_KEY"))
+			if err != nil {
+				panic(err)
+			}
+			cfg.Net.TLS.Config.Certificates = []tls.Certificate{cert}
+		}
+		if user := os.Getenv("KAFKA_TEST_SASL_USER"); user != "" {
+			cfg.Net.SASL.Enable = true
+			cfg.Net.SASL.Handshake = true
+			cfg.Net.SASL.User = user
+			cfg.Net.SASL.Password = os.Getenv("KAFKA_TEST_SASL_PASSWORD")
+		}
+	}
 	return cfg
 }
 
@@ -76,7 +104,9 @@ func integrationConsumer(t *testing.T, address, topic, group string) (*KafkaCli,
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	pool := &sync.Pool{New: func() interface{} { return &KafkaMsg{} }}
-	cli, err := NewKafkaCliWithGroupID(ctx, &KafkaCliCfg{Brokers: []string{address}, Topics: []string{topic}, Groupid: group, KMsgPool: pool}, WithCommitFilterCheckInterval(50*time.Millisecond), WithCommitFilterCheckNum(1))
+	clusterCfg := cluster.NewConfig()
+	clusterCfg.Config = *integrationConfig()
+	cli, err := NewKafkaCliWithGroupID(ctx, &KafkaCliCfg{Brokers: []string{address}, Topics: []string{topic}, Groupid: group, KMsgPool: pool, ClusterConfig: clusterCfg, AllowPlaintextForTrustedTunnel: os.Getenv("KAFKA_TEST_TLS_CA") == ""}, WithCommitFilterCheckInterval(50*time.Millisecond), WithCommitFilterCheckNum(1))
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -292,5 +322,40 @@ func TestIntegrationConcurrentClose(t *testing.T) {
 			t.Error("concurrent Close did not complete")
 			return
 		}
+	}
+}
+
+func TestIntegrationSecureConstructorRejectsUntrustedAndMismatchedPeers(t *testing.T) {
+	address := integrationBroker(t)
+	if os.Getenv("KAFKA_TEST_TLS_CA") == "" {
+		t.Fatal("secure acceptance requires synthetic TLS CA")
+	}
+	for _, mode := range []string{"unknown CA", "wrong hostname", "missing client certificate", "wrong SASL"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := cluster.NewConfig()
+			cfg.Config = *integrationConfig()
+			cfg.Net.DialTimeout = time.Second
+			cfg.Net.ReadTimeout = time.Second
+			cfg.Net.WriteTimeout = time.Second
+			cfg.Metadata.Retry.Max = 0
+			switch mode {
+			case "unknown CA":
+				cfg.Net.TLS.Config.RootCAs = x509.NewCertPool()
+			case "wrong hostname":
+				cfg.Net.TLS.Config.ServerName = "wrong.invalid"
+			case "missing client certificate":
+				cfg.Net.TLS.Config.Certificates = nil
+			case "wrong SASL":
+				cfg.Net.SASL.Password = "deliberately-wrong-synthetic"
+			}
+			pool := &sync.Pool{New: func() interface{} { return &KafkaMsg{} }}
+			cli, err := NewKafkaCliWithGroupID(context.Background(), &KafkaCliCfg{Brokers: []string{address}, Topics: []string{"synthetic-denied"}, Groupid: integrationName(t), KMsgPool: pool, ClusterConfig: cfg})
+			if cli != nil {
+				cli.Close()
+			}
+			if err == nil {
+				t.Fatal("invalid protected transport accepted")
+			}
+		})
 	}
 }

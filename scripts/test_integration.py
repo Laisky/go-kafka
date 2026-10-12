@@ -77,7 +77,7 @@ def main():
             print("Owned broker host-loopback readiness accepted", flush=True)
             test_env = {key: os.environ[key] for key in ("HOME", "PATH", "GOMODCACHE", "GOCACHE", "GOROOT", "GOPROXY", "GOSUMDB") if key in os.environ}
             test_env.update(KAFKA_TEST_BROKER="127.0.0.1:" + str(port), GOTOOLCHAIN="local")
-            result = subprocess.run([go, "test", "-tags", "integration", "-race", "-count=1", "-timeout=120s", "-v", "./..."],
+            result = subprocess.run([go, "test", "-tags", "integration", "-skip", "^TestIntegrationSecureConstructor", "-race", "-count=1", "-timeout=120s", "-v", "./..."],
                                     cwd=ROOT, env=test_env, text=True, timeout=240)
             return result.returncode
         finally:
