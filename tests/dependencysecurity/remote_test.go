@@ -3,16 +3,18 @@ package dependencysecurity_test
 import (
 	"bytes"
 	"encoding/binary"
-	consul "github.com/hashicorp/consul/api"
-	"github.com/pkg/sftp"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/types/known/anypb"
 	"io"
+	"mime"
 	"net/http"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	consul "github.com/hashicorp/consul/api"
+	"github.com/pkg/sftp"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestProtoJSONRejectsMissingValue(t *testing.T) {
@@ -32,6 +34,7 @@ type discardWriteCloser struct{}
 
 func (discardWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
 func (discardWriteCloser) Close() error                { return nil }
+
 func TestSFTPPacketLengthIsBounded(t *testing.T) {
 	var prefix [4]byte
 	binary.BigEndian.PutUint32(prefix[:], 16<<20)
@@ -54,6 +57,7 @@ func TestSFTPPacketLengthIsBounded(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestConsulClientSetsContentType(t *testing.T) {
 	seen := ""
 	config := consul.DefaultConfig()
@@ -69,7 +73,10 @@ func TestConsulClientSetsContentType(t *testing.T) {
 	if _, _, err = client.KV().Get("synthetic", nil); err != nil {
 		t.Fatal(err)
 	}
-	if seen != "application/json" {
-		t.Fatalf("API request lacks expected content type: %q", seen)
+	// Newer Consul clients explicitly include charset=utf-8. The security
+	// contract is a valid JSON media type, not a byte-for-byte header spelling.
+	mediaType, _, err := mime.ParseMediaType(seen)
+	if err != nil || mediaType != "application/json" {
+		t.Fatalf("API request lacks a valid JSON content type: %q (%v)", seen, err)
 	}
 }
