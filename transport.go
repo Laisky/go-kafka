@@ -23,6 +23,11 @@ func validatedKafkaConfig(cfg *KafkaCliCfg) (*cluster.Config, error) {
 		*config = *cfg.ClusterConfig
 		config.Group.Member.UserData = append([]byte(nil), cfg.ClusterConfig.Group.Member.UserData...)
 	}
+	// The wrapper exposes only the multiplexed Messages stream, not Partitions.
+	// Accepting partition mode would silently strand messages in an unread stream.
+	if config.Group.Mode != cluster.ConsumerModeMultiplex {
+		return nil, fmt.Errorf("Kafka wrapper requires ConsumerModeMultiplex")
+	}
 	config.Net.KeepAlive = 30 * time.Second
 	config.Consumer.Return.Errors = true
 	config.Group.Return.Notifications = true
