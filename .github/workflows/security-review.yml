@@ -1,0 +1,39 @@
+name: Dependency review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'integration')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.26.9'
+      - name: Verify selected dependency identities
+        run: |
+          go mod download
+          go mod verify
+          go list -m all
+      - name: Verify JWT security behavior
+        run: go test -race -count=1 -timeout=60s -run TestJWTDependencyRejectsOversizedAndInvalidTokens -v ./tests/dependencysecurity
+      - name: Install pinned Go vulnerability scanner
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+      - name: Check imported packages against current vulnerability data
+        run: govulncheck -scan package -show verbose ./...
+      - name: Check reachable vulnerable symbols
+        run: govulncheck -show verbose ./...
