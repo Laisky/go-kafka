@@ -4,7 +4,7 @@ go 1.26.9
 
 require (
 	github.com/IBM/sarama v1.61.1
-	github.com/Laisky/go-utils/v6 v6.4.1-0.20261028101011-0f5eeca06f8d
+	github.com/Laisky/go-utils/v6 v6.4.1-0.20261028151721-188dec4c3b75
 	github.com/Laisky/zap v1.27.1-0.20261006114731-55f41c2b5061
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hashicorp/consul/api v1.34.5
