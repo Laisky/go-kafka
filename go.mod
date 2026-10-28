@@ -4,7 +4,7 @@ go 1.26.9
 
 require (
 	github.com/IBM/sarama v1.61.1
-	github.com/Laisky/go-utils/v6 v6.4.0
+	github.com/Laisky/go-utils/v6 v6.4.1-0.20261028151721-188dec4c3b75
 	github.com/Laisky/zap v1.27.1-0.20261006114731-55f41c2b5061
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hashicorp/consul/api v1.34.5
@@ -64,7 +64,7 @@ require (
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20261011100332-faecfb24eb49 // indirect
 	golang.org/x/lint v0.0.0-20241112194109-818c5a804067 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
